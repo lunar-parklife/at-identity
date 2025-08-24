@@ -1,0 +1,3 @@
+This software is everything you need for AT Proto identities packaged in a
+server. It can resolve handles into DIDs, DIDs into identity documents, and
+validate identities. It mirrors the PLC ledger and can be stood up on its own.
