@@ -17,6 +17,13 @@ type Resolver struct {
 	TTL         time.Duration
 }
 
+func DefaultResolver() *Resolver {
+	return &Resolver{
+		PLCLedger: "https://plc.directory",
+		TTL:       time.Hour * 12,
+	}
+}
+
 type documentResolution struct {
 	did      *DID
 	doc      *Doc
@@ -109,11 +116,10 @@ func (resolver *Resolver) Handle(handle string) (*DID, error) {
 			return cached.did, nil
 		}
 	}
-	normalized := strings.Trim(strings.Trim(strings.Trim(handle, "at://"), "https://"), "http://")
-	if !strings.HasPrefix(normalized, "_atproto.") {
-		normalized = fmt.Sprintf("_atproto.%s", normalized)
+	if !strings.HasPrefix(handle, "_atproto.") {
+		handle = fmt.Sprintf("_atproto.%s", handle)
 	}
-	records, err := net.LookupTXT(normalized)
+	records, err := net.LookupTXT(handle)
 	if err != nil {
 		return nil, err
 	}
@@ -133,7 +139,7 @@ func (resolver *Resolver) Handle(handle string) (*DID, error) {
 			return did, nil
 		}
 	}
-	response, err := http.Get(fmt.Sprintf("https://%s/.well-known/at-did", strings.TrimPrefix(normalized, "_atproto.")))
+	response, err := http.Get(fmt.Sprintf("https://%s/.well-known/at-did", strings.TrimPrefix(handle, "_atproto.")))
 	if err != nil {
 		return nil, err
 	}
