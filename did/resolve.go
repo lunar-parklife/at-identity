@@ -10,17 +10,21 @@ import (
 	"time"
 )
 
+// Resolves handles to DIDs and DIDs to documents.
 type Resolver struct {
-	didCache    []*documentResolution
-	handleCache []*handleResolution
-	PLCLedger   string
-	TTL         time.Duration
+	didCache    []*documentResolution // Previous DID-to-document resolutions.
+	handleCache []*handleResolution   // Previous handle-to-DID resolutions.
+	PLCLedger   string                // Where to fetch PLC documents from.
+	sinceClean  int                   // How many requests have been made since this was last cleaned?
+	untilClean  int                   // How many requests trigger a clean?
+	TTL         time.Duration         // How long until a resolution is stale?
 }
 
 func DefaultResolver() *Resolver {
 	return &Resolver{
-		PLCLedger: "https://plc.directory",
-		TTL:       time.Hour * 12,
+		PLCLedger:  "https://plc.directory",
+		TTL:        time.Hour * 12,
+		untilClean: 1000,
 	}
 }
 
@@ -36,7 +40,10 @@ type handleResolution struct {
 	resolved time.Time
 }
 
-func (resolver *Resolver) Clean() {
+func (resolver *Resolver) clean() {
+	if resolver.sinceClean < resolver.untilClean {
+		return
+	}
 	expirary := time.Now().Add(resolver.TTL)
 	var x, y, z, l int
 	var handle *handleResolution
@@ -71,6 +78,7 @@ func (resolver *Resolver) Clean() {
 		}
 	}
 	resolver.didCache = didCache
+	resolver.sinceClean = 0
 }
 
 func (resolver *Resolver) Doc(did *DID) (*Doc, error) {
@@ -79,6 +87,7 @@ func (resolver *Resolver) Doc(did *DID) (*Doc, error) {
 			return cached.doc, nil
 		}
 	}
+	defer resolver.clean()
 	switch did.Method {
 	case "plc":
 		target := fmt.Sprintf("%s/%s", resolver.PLCLedger, did.String())
@@ -97,7 +106,11 @@ func (resolver *Resolver) Doc(did *DID) (*Doc, error) {
 			if err != nil {
 				return nil, err // TODO: This is fragile.
 			}
-			return nil, fmt.Errorf("error resolving DID <%s> with status code <%d>: %s", did.String(), response.StatusCode, obj["message"])
+			return nil, &PLCError{
+				DID:        did,
+				StatusCode: response.StatusCode,
+				Message:    obj["message"],
+			}
 		}
 		result := &Doc{}
 		err = json.Unmarshal(bytes, result)
@@ -105,6 +118,7 @@ func (resolver *Resolver) Doc(did *DID) (*Doc, error) {
 			return nil, err
 		}
 		return result, nil
+		// TODO: Implement web method.
 	default:
 		return nil, fmt.Errorf("invalid method <%s> for did <%s>", did.Method, did.String())
 	}
@@ -116,6 +130,7 @@ func (resolver *Resolver) Handle(handle string) (*DID, error) {
 			return cached.did, nil
 		}
 	}
+	defer resolver.clean()
 	if !strings.HasPrefix(handle, "_atproto.") {
 		handle = fmt.Sprintf("_atproto.%s", handle)
 	}
@@ -126,7 +141,7 @@ func (resolver *Resolver) Handle(handle string) (*DID, error) {
 	for _, record := range records {
 		rawDID, found := strings.CutPrefix(record, "did=")
 		if found {
-			did, err := parse(rawDID)
+			did, err := Parse(rawDID)
 			if err != nil {
 				return nil, err
 			}
@@ -147,7 +162,7 @@ func (resolver *Resolver) Handle(handle string) (*DID, error) {
 	if err != nil {
 		return nil, err
 	}
-	did, err := parse(string(responseBytes))
+	did, err := Parse(string(responseBytes))
 	if err != nil {
 		return nil, err
 	}
@@ -158,4 +173,14 @@ func (resolver *Resolver) Handle(handle string) (*DID, error) {
 	}
 	resolver.handleCache = append(resolver.handleCache, resolution)
 	return did, nil
+}
+
+type PLCError struct {
+	DID        *DID   `json:"did"`
+	StatusCode int    `json:"statusCode"`
+	Message    string `json:"message"`
+}
+
+func (err PLCError) Error() string {
+	return fmt.Sprintf("error resolving did <%s> with code <%d>: %s", err.DID.String(), err.StatusCode, err.Message)
 }

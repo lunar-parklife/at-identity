@@ -35,7 +35,7 @@ func (doc *Doc) UnmarshalJSON(from []byte) error {
 	if err != nil {
 		return err
 	}
-	id, err := parse(model.Id)
+	id, err := Parse(model.Id)
 	if err != nil {
 		return err
 	}
